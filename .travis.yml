@@ -22,7 +22,6 @@ cache:
 jdk:
   - openjdk8
   - openjdk11
-  - openjdk14
   - openjdk-ea
   - oraclejdk11
 
@@ -36,6 +35,13 @@ matrix:
 # --no-transfer-progress requires Maven 3.6.1+. Otherwise use --batch-mode
 script:
   - mvn -V --no-transfer-progress
+  - echo "Skipped tests (testcase + <skipped> entry from target/surefire-reports):"
+  - for f in target/surefire-reports/TEST-*.xml; do awk '/<testcase /{tc=$0} /<skipped/{print tc; print "    " $0}' "$f"; done
+  - echo "Reasons for the assumption-based skips (JUnit prints no message for an assumeTrue without one):"
+  - echo "  FileFilterTestCase.testCanExecute is Windows-only and is skipped on Linux legs"
+  - grep -n 'assumeTrue(SystemUtils.IS_OS_WINDOWS)' src/test/java/org/apache/commons/io/filefilter/FileFilterTestCase.java
+  - echo "  BOMInputStreamTest.testReadXmlWithBOMUcs4 is skipped when the JVM does not provide the ISO-10646-UCS-4 charset"
+  - grep -n 'assumeTrue(Charset.isSupported("ISO-10646-UCS-4"))' src/test/java/org/apache/commons/io/input/BOMInputStreamTest.java
 
 after_success:
   - mvn -V --no-transfer-progress clean cobertura:cobertura coveralls:report -Ptravis-cobertura

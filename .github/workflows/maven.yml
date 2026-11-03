@@ -15,13 +15,19 @@
 
 name: Java CI
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional Maven test selector, e.g. -Dtest=XmlStreamReaderTest'
+        required: false
+        default: ''
 
 jobs:
   build:
 
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 45
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -38,15 +44,28 @@ jobs:
         
     steps:
     - uses: actions/checkout@v2.3.2
-    - uses: actions/cache@v2
-      with:
-        path: ~/.m2/repository
-        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          ${{ runner.os }}-maven-
     - name: Set up JDK ${{ matrix.java }}
-      uses: actions/setup-java@v1.4.2
+      uses: actions/setup-java@v2
       with:
+        distribution: 'adopt'
         java-version: ${{ matrix.java }}
     - name: Build with Maven
-      run: mvn -V --file pom.xml --no-transfer-progress -DtrimStackTrace=false
+      run: mvn -V --file pom.xml --no-transfer-progress -DtrimStackTrace=false "-Drat.skip=true" ${{ inputs.test-filter }}
+    - name: Print skipped tests and their reasons
+      if: always()
+      shell: bash
+      run: |
+        echo "Skipped tests (testcase + <skipped> entry from target/surefire-reports):"
+        for f in target/surefire-reports/TEST-*.xml; do awk '/<testcase /{tc=$0} /<skipped/{print tc; print "    " $0}' "$f"; done
+        echo "Reasons for the assumption-based skips (JUnit prints no message for an assumeTrue without one):"
+        echo "  FileFilterTestCase.testCanExecute is Windows-only and is skipped on Linux legs:"
+        grep -n 'assumeTrue(SystemUtils.IS_OS_WINDOWS)' src/test/java/org/apache/commons/io/filefilter/FileFilterTestCase.java
+        echo "  BOMInputStreamTest.testReadXmlWithBOMUcs4 is skipped when the JVM does not provide the ISO-10646-UCS-4 charset:"
+        grep -n 'assumeTrue(Charset.isSupported("ISO-10646-UCS-4"))' src/test/java/org/apache/commons/io/input/BOMInputStreamTest.java
+    - name: Upload Maven build artifacts
+      if: success() && matrix.os == 'ubuntu-latest' && matrix.java == '8'
+      uses: actions/upload-artifact@v4
+      with:
+        name: built-jars
+        path: target/commons-io-*.jar
+        if-no-files-found: error
